@@ -28,4 +28,25 @@ public class TestMeGeneratorTestNgTest extends TestMeGeneratorTestBase {
     public void testMockReturned() throws Exception {
         doTest(new FileTemplateConfig(TestMeConfigPersistent.getInstance().getState()));
     }
+
+    public void testUtilWithoutAccessableCtor() {
+        doTest(true, true, true);
+    }
+
+    public void testVerifyMethodCall() {
+        doTest(new FileTemplateConfig(TestMeConfigPersistent.getInstance().getState()));
+    }
+
+    public void testMockFieldsInDependencyInjection() {
+        doTest(new FileTemplateConfig(TestMeConfigPersistent.getInstance().getState()));
+    }
+
+    public void testMockFieldsInDiWithSetter() {
+        doTest(new FileTemplateConfig(TestMeConfigPersistent.getInstance().getState()));
+    }
+
+    public void testMockFieldsInDiWithCtor() {
+        doTest(new FileTemplateConfig(TestMeConfigPersistent.getInstance().getState()));
+    }
+
 }

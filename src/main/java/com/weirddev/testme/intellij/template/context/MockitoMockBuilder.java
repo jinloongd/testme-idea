@@ -6,6 +6,7 @@ import org.jetbrains.annotations.NotNull;
 import org.jetbrains.annotations.Nullable;
 
 import java.util.*;
+import java.util.function.Predicate;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
@@ -15,10 +16,11 @@ import java.util.regex.Pattern;
  * @author Yaron Yamin
  */
 
-public class  MockitoMockBuilder {
+public class  MockitoMockBuilder implements MockBuilder{
     private static final Logger LOG = Logger.getInstance(MockitoMockBuilder.class.getName());
-    private static final Map<String, String> TYPE_TO_ARG_MATCHERS;
+    public static final Map<String, String> TYPE_TO_ARG_MATCHERS;
     private static final Pattern SEMVER_PATTERN = Pattern.compile("^(\\d*)\\.(\\d*)\\.*");
+    public static final Pattern LOGGER_PATTERN = Pattern.compile("(?i).*log.*");
 
     static {
         TYPE_TO_ARG_MATCHERS = new HashMap<>();
@@ -69,7 +71,7 @@ public class  MockitoMockBuilder {
      */
     private final boolean isMockitoMockMakerInlineOn;
     private final boolean stubMockMethodCallsReturnValues;
-    private final TestSubjectInspector testSubjectInspector;
+    protected final TestSubjectInspector testSubjectInspector;
     @Nullable
     private final String mockitoCoreVersion;
     private final Integer mockitoCoreMajorVersion;
@@ -107,10 +109,36 @@ public class  MockitoMockBuilder {
      * true - field can be mocked
      */
     @SuppressWarnings("unused")
+    @Deprecated
     public boolean isMockable(Field field) {
-        final boolean isMockable = !field.getType().isPrimitive() && !isWrapperType(field.getType()) && (!field.getType().isFinal() || isMockitoMockMakerInlineOn) && !field.isOverridden() && !field.getType().isArray() && !field.getType().isEnum();
-        LOG.debug("field "+field.getType().getCanonicalName()+" "+field.getName()+" is mockable:"+isMockable);
+        return isMockable(field, null);
+    }
+
+    /**
+     * true - field can be mocked
+     */
+    @SuppressWarnings("unused")
+    @Override
+    public boolean isMockable(Field field, Type testedClass) {
+        final boolean isMockable = isMockableCommonChecks(field, testedClass) && (!field.getType().isFinal() || isMockitoMockMakerInlineOn);
+        LOG.debug("field " + field.getType().getCanonicalName() + " " + field.getName() + " is mockable:" + isMockable);
         return isMockable;
+    }
+
+    /**
+     * checks if field in testedClass can be mocked. evaluates conditions common to all currently supported mock frameworks
+     * @return true if input field in testedClass can be mocked
+     */
+    protected boolean isMockableCommonChecks(Field field, Type testedClass) {
+        return !field.getType().isPrimitive() && !isWrapperType(field.getType())
+                && !field.isOverridden() && !field.getType().isArray() && !field.getType().isEnum()
+                && !testSubjectInspector.isNotInjectedInDiClass(field, testedClass) && !isInitInline(field);
+    }
+
+    private static boolean isInitInline(Field field) {
+        //for now, avoid applying on all such fields since it's hard to deduct if default value overridden in ctor. settling for typical logger initialization pattern
+        //todo try to also deduct if init in static block
+        return field.isInitializedInline() && !field.isHasSetter() && LOGGER_PATTERN.matcher(field.getName()).matches();
     }
 
     /**
@@ -128,13 +156,22 @@ public class  MockitoMockBuilder {
      * true - if any given field can be mocked
      */
     @SuppressWarnings("unused")
-    public boolean hasMockable(List<Field> fields) {
+    public boolean hasMockable(List<Field> fields, Type testedClass) {
         for (Field field : fields) {
-            if (isMockable(field)) {
+            if (isMockable(field, testedClass)) {
                 return true;
             }
         }
         return false;
+    }
+
+    /**
+     *
+     * @param testedClass the tested class
+     * @return true - if the tested class has mockable field
+     */
+    public boolean hasMocks(Type testedClass) {
+        return testSubjectInspector.hasAccessibleCtor(testedClass) && hasMockable(testedClass.getFields(), testedClass);
     }
 
     /**
@@ -160,15 +197,16 @@ public class  MockitoMockBuilder {
      * @param field reported field
      * @return an error message explaining why field cannot be mocked
      */
+    @Override
     @SuppressWarnings("unused")
-    public String getImmockabiliyReason(String prefix,Field field) {
+    public String getImmockabiliyReason(String prefix,Field field) {//consider deprecating when supporting explicit type initialization
         final String reasonMsgPrefix = prefix+"Field " + field.getName() + " of type " + field.getType().getName();
         if (field.getType().isFinal() && !isMockitoMockMakerInlineOn && isMockExpected(field)) {
             return reasonMsgPrefix + " - was not mocked since Mockito doesn't mock a Final class when 'mock-maker-inline' option is not set";
         } else if (field.getType().isArray()) {
             return reasonMsgPrefix + "[] - was not mocked since Mockito doesn't mock arrays";
-        } else if (field.getType().isEnum()) {
-            return reasonMsgPrefix + " - was not mocked since Mockito doesn't mock enums";
+//        } else if (field.getType().isEnum()) { //msg makes sense only when test subject is not an enum. can't test such condition since test subject not being passed.
+//            return reasonMsgPrefix + " - was not mocked since Mockito doesn't mock enums";
         } else {
             return "";
         }
@@ -181,6 +219,7 @@ public class  MockitoMockBuilder {
      * @return mocked arguments expression
      * @see Language
      */
+    @Override
     @SuppressWarnings("unused")
     public String buildMockArgsMatchers(List<Param> params,String language) {
         final StringBuilder sb = new StringBuilder();
@@ -218,29 +257,66 @@ public class  MockitoMockBuilder {
         return matcherType;
     }
 
+    @SuppressWarnings("unused")
+    @Deprecated
+    public boolean shouldStub(Method testMethod, List<Field> testedClassFields) {
+        return callsMockMethod(testMethod, testedClassFields, Method::hasReturn, null);
+    }
+
+
     /**
      * true - if should stub tested method
      * @param testMethod method being tested
-     * @param testedClassFields fields of owner type being tested
+     * @param testedClass tested class
      */
     @SuppressWarnings("unused")
-    public boolean shouldStub(Method testMethod, List<Field> testedClassFields) {
-        boolean shouldStub = false;
-        if (stubMockMethodCallsReturnValues) {
-            for (Field testedClassField : testedClassFields) {
-                if (isMockable(testedClassField)) {
-                    LOG.debug("field "+testedClassField.getName()+" type "+testedClassField.getType().getCanonicalName()+" type methods:"+testedClassField.getType().getMethods().size());
-                    for (Method fieldMethod : testedClassField.getType().getMethods()) {
-                        if (fieldMethod.getReturnType() != null && !"void".equals(fieldMethod.getReturnType().getCanonicalName()) && testSubjectInspector.isMethodCalled(fieldMethod, testMethod)) {
-                            shouldStub = true;
-                            break;
-                        }
-                    }
+    public boolean shouldStub(Method testMethod, Type testedClass) {
+        return callsMockMethod(testMethod, testedClass.getFields(), Method::hasReturn, testedClass);
+    }
+
+    /**
+     * true - if should verify tested method
+     * @param testMethod method being tested
+     * @param testedClassFields tested class fields
+     */
+    @Deprecated
+    @SuppressWarnings("unused")
+    public boolean shouldVerify(Method testMethod, List<Field> testedClassFields) {
+        return callsMockMethod(testMethod, testedClassFields, method -> !method.hasReturn(), null);
+    }
+
+    /**
+     * true - if should verify tested method
+     * @param testMethod method being tested
+     * @param testedClass tested class
+     */
+    @SuppressWarnings("unused")
+    public boolean shouldVerify(Method testMethod, Type testedClass) {
+        return callsMockMethod(testMethod, testedClass.getFields(), method -> !method.hasReturn(), testedClass);
+    }
+
+    private boolean callsMockMethod(Method testMethod, List<Field> testedClassFields,
+        Predicate<Method> mockMethodRelevant, Type testedClass) {
+        boolean callsMockMethod = false;
+        if (!stubMockMethodCallsReturnValues) {
+            LOG.debug("method " + testMethod.getMethodId() + " is calling a mock method:" + callsMockMethod);
+            return callsMockMethod;
+        }
+        for (Field testedClassField : testedClassFields) {
+            if (!isMockable(testedClassField, testedClass)) {
+                continue;
+            }
+            LOG.debug("field " + testedClassField.getName() + " type " + testedClassField.getType().getCanonicalName()
+                + " type methods:" + testedClassField.getType().getMethods().size());
+            for (Method fieldMethod : testedClassField.getType().getMethods()) {
+                if (mockMethodRelevant.test(fieldMethod)
+                    && testSubjectInspector.isMethodCalled(fieldMethod, testMethod)) {
+                    return true;
                 }
             }
         }
-        LOG.debug("method "+testMethod.getMethodId()+" should be stabbed:"+shouldStub);
-        return shouldStub;
+        LOG.debug("method " + testMethod.getMethodId() + " is calling a mock method:" + callsMockMethod);
+        return callsMockMethod;
     }
 
     /**
@@ -296,6 +372,7 @@ public class  MockitoMockBuilder {
     /**
       *  @return true - if Field should be mocked
       */
+    @Override
     public boolean isMockExpected(Field field) {
         return !field.getType().isPrimitive() && !isWrapperType(field.getType()) && !field.isStatic() && !field.isOverridden();
     }
@@ -303,7 +380,7 @@ public class  MockitoMockBuilder {
     /**
      * true - if type is a wrapper for other type, such as a primitive
      */
-    private boolean isWrapperType(Type type) {
+    public boolean isWrapperType(Type type) {
         return WRAPPER_TYPES.contains(type.getCanonicalName());
     }
 

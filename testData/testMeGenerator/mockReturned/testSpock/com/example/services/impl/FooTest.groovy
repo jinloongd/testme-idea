@@ -1,7 +1,6 @@
 package com.example.services.impl
 
 import com.example.beans.ConvertedBean
-import com.example.dependencies.Logger
 import com.example.foes.Fear
 import com.example.foes.Fire
 import com.example.foes.Ice
@@ -10,6 +9,8 @@ import spock.lang.*
 import org.mockito.InjectMocks
 import org.mockito.Mock
 import org.mockito.MockitoAnnotations
+
+import java.util.function.Supplier
 import static org.mockito.Mockito.*
 
 /** created by TestMe integration test on MMXVI */
@@ -17,7 +18,8 @@ class FooTest extends Specification {
     @Mock
     FooFighter fooFighter
     @Mock
-    Logger logger
+    Supplier<Integer> result
+
     @InjectMocks
     Foo foo
 
@@ -28,6 +30,7 @@ class FooTest extends Specification {
     def "test fight"() {
         given:
         when(fooFighter.surrender(any(), any(), anyInt())).thenReturn(new ConvertedBean(myString: "myString", someNum: 0, fear: new Fear(), ice: new Ice()))
+        when(result.get()).thenReturn(0)
 
         when:
         String result = foo.fight(new Fire(), "foeName")

@@ -27,3 +27,17 @@ dependencies {
         exclude group:'org.jetbrains.plugins', module: 'Groovy'
     }
 }
+test {
+    jacoco {
+        includeNoLocationClasses = true
+        excludes = ["jdk.internal.*"]
+    }
+}
+jacocoTestReport {
+    dependsOn test // tests are required to run before generating the report
+    classDirectories.setFrom(instrumentCode)
+    reports {
+        xml.required = true
+    }
+    outputs.upToDateWhen { false } // Always generate report
+}

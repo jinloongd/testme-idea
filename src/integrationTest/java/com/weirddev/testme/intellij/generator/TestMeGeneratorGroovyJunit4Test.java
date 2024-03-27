@@ -1,5 +1,6 @@
 package com.weirddev.testme.intellij.generator;
 
+
 import com.weirddev.testme.intellij.template.TemplateRegistry;
 import com.weirddev.testme.intellij.template.context.Language;
 
@@ -42,4 +43,5 @@ public class TestMeGeneratorGroovyJunit4Test extends TestMeGeneratorJunit4Test {
     public void testCtorOverSetters() throws Exception{
         doTest(true,true,true,67, false, false);
     }
+
 }
